@@ -1,0 +1,11 @@
+[DEFAULT]
+bantime = 6h
+findtime  = 30m
+maxretry = 5
+
+banaction = ufw
+banaction_allports = ufw
+
+[sshd]
+enabled = true
+port = ssh
