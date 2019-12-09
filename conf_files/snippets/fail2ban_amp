@@ -1,0 +1,39 @@
+
+[apache-auth]
+enabled = true
+logpath  = %(apache_error_log)s
+
+[apache-badbots]
+enabled = true
+logpath  = %(apache_access_log)s
+
+[apache-noscript]
+enabled = true
+logpath  = %(apache_error_log)s
+
+[apache-overflows]
+enabled = true
+logpath  = %(apache_error_log)s
+
+[apache-nohome]
+enabled = true
+logpath  = %(apache_error_log)s
+
+[apache-botsearch]
+enabled = true
+logpath  = %(apache_error_log)s
+
+[apache-fakegooglebot]
+enabled = true
+logpath  = %(apache_access_log)s
+
+[apache-shellshock]
+enabled = true
+logpath = %(apache_error_log)s
+
+[php-url-fopen]
+enabled = true
+logpath = %(apache_access_log)s
+
+[phpmyadmin-syslog]
+enabled = true

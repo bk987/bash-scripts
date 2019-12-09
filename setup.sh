@@ -134,7 +134,7 @@ function upgrade_pkgs() {
 }
 
 function add_user() {
-	title "USER SETUP"
+    title "USER SETUP"
     echo -ne " ${working} Adding new non-root user "
     sleep 1
 	if grep -q "$inp_user_name" /etc/passwd; then

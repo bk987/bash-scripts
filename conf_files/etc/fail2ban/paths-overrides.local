@@ -1,0 +1,7 @@
+[DEFAULT]
+
+apache_error_log = /var/log/apache2/*error.log
+                   /srv/*/*/logs/error.log
+
+apache_access_log = /var/log/apache2/*access.log
+                    /srv/*/*/logs/access.log
