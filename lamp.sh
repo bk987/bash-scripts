@@ -50,13 +50,8 @@ function main() {
         while :; do
             read -rp " System user under which the site will be created? : " input
             if [[ "$input" =~ ^[a-z_]([a-z0-9_-]{0,31}|[a-z0-9_-]{0,30}\$)$ ]]; then
-                groups "$input" 2>/dev/null | grep -q sudo
-                if [[ $? -ne 0 ]]; then
-                    inp_user_name="$input"
-                    break
-                else
-                    echo " ... Can not create a site under a sudo user! "
-                fi
+                inp_user_name="$input"
+				break
             else
                 echo " ... Invalid username "
             fi
@@ -71,25 +66,9 @@ function main() {
         done
 
         while :; do
-            read -rp " Generate self-signed SSL certificate? [y/n]: " input
-            if [[ "$input" =~ ^[yYnN]$ ]]; then
-                inp_generate_ssl="$input"
-                break
-            fi
-        done
-
-        while :; do
             read -rp " Create a database for this site? [y/n]: " input
             if [[ "$input" =~ ^[yYnN]$ ]]; then
                 inp_create_database="$input"
-                break
-            fi
-        done
-
-        while :; do
-            read -rp " Enable SFTP for the user? [y/n]: " input
-            if [[ "$input" =~ ^[yYnN]$ ]]; then
-                inp_enable_sftp="$input"
                 break
             fi
         done
@@ -156,10 +135,10 @@ function install_amp() {
     apt_fn install software-properties-common &&
     add-apt-repository -y ppa:ondrej/php >/dev/null 2>&1 &&
     apt_fn update &&
-    apt_fn install apache2 apachetop php7.3-fpm php7.3-common php7.3-cli php7.3-dev php7.3-mysql \
-        php7.3-curl php7.3-json php7.3-gd php7.3-imagick php7.3-imap php7.3-mbstring php7.3-intl \
-        php7.3-xml php7.3-xmlrpc php7.3-soap php7.3-zip php7.3-bcmath mariadb-server debconf-utils \
-        build-essential
+    apt_fn install apache2 apachetop php8.1-fpm php8.1-common php8.1-cli php8.1-dev php8.1-mysql \
+        php8.1-curl php8.1-gd php8.1-imagick php8.1-imap php8.1-mbstring php8.1-intl php8.1-bcmath \
+        php8.1-xml php8.1-xmlrpc php8.1-soap php8.1-zip libapache2-mod-php8.1 mariadb-server \
+		debconf-utils build-essential
     if [[ $? -eq 0 ]]; then
         echo -e " ${success} Necessary packages have been installed "
         return 0
@@ -174,7 +153,6 @@ function configure_amp() {
     configure_apache
     configure_php
     configure_mariadb
-    configure_other
 }
 
 function configure_apache() {
@@ -185,11 +163,10 @@ function configure_apache() {
     fi
     echo -ne " ${working} Configuring Apache "
     sleep 1
-    local ssl_params="/etc/apache2/conf-available/ssl-params.conf"
-    cp "${files}${ssl_params}" "$ssl_params"
-    {
+	{
         a2enmod expires headers rewrite ssl alias proxy proxy_fcgi setenvif &&
-        a2enconf php7.3-fpm ssl-params &&
+        a2enconf php8.1-fpm &&
+        > /var/www/html/index.html &&
         service apache2 restart
     } >/dev/null 2>&1
     if [[ $? -eq 0 ]]; then
@@ -202,17 +179,17 @@ function configure_apache() {
 }
 
 function configure_php() {
-    service php7.3-fpm status >/dev/null 2>&1
+    service php8.1-fpm status >/dev/null 2>&1
     if [[ $? -ne 0 ]]; then
         echo -e " ${failure} PHP-FPM has not been installed properly " >&2
         return 1
     fi
     echo -ne " ${working} Configuring PHP-FPM "
     sleep 1
-    local php_fpm="/etc/php/7.3/fpm/php-fpm.conf"
+    local php_fpm="/etc/php/8.1/fpm/php-fpm.conf"
     cp $php_fpm "${php_fpm}.$(date +%m_%d_%Y_%H_%M_%S).bak" &&
     {
-        service php7.3-fpm restart
+        service php8.1-fpm restart
     } >/dev/null 2>&1
     if [[ $? -eq 0 ]]; then
         echo -e " ${success} PHP-FPM has been configured "
@@ -267,59 +244,6 @@ function configure_mariadb() {
     fi
 }
 
-function configure_other() {
-    # If UFW is installed, add rule for Apache
-    ufw status >/dev/null 2>&1
-    if [[ $? -eq 0 ]]; then
-        echo -ne " ${working} Adding UFW rule for Apache "
-        sleep 1
-        ufw allow 'Apache Full' >/dev/null 2>&1
-        if [[ $? -eq 0 ]]; then
-            echo -e " ${success} UFW rule has been added for Apache "
-        else
-            echo -e " ${failure} Unable to add UFW rule for Apache " >&2
-        fi
-    fi
-
-    # If Fail2Ban is installed, add jails for AMP
-    fail2ban-client status >/dev/null 2>&1
-    if [[ $? -eq 0 ]]; then
-        echo -ne " ${working} Adding Fail2Ban jails "
-        sleep 1
-        cp "${files}/etc/fail2ban/paths-overrides.local" /etc/fail2ban/paths-overrides.local &&
-        cat "${files}/snippets/fail2ban_amp" >> /etc/fail2ban/jail.local &&
-        fail2ban-client reload >/dev/null 2>&1
-        if [[ $? -eq 0 ]]; then
-            echo -e " ${success} Fail2Ban jails have been added "
-        else
-            echo -e " ${failure} Unable to add Fail2Ban jails " >&2
-        fi
-    fi
-    echo -ne " ${working} Configuring SFTP "
-    sleep 1
-    {
-        addgroup sftp_users &&
-        sed -i -E "/^#?Subsystem sftp/c\Subsystem sftp internal-sftp -u 022" $sshd_conf &&
-        printf "%s\n" \
-            "" \
-            "Match Group sftp_users" \
-            "    ForceCommand internal-sftp -u 022" \
-            "    ChrootDirectory /srv/%u" \
-            "    PasswordAuthentication yes" \
-            "    PermitTunnel no" \
-            "    AllowAgentForwarding no" \
-            "    AllowTCPForwarding no" \
-            "    X11Forwarding no" \
-            >> /etc/ssh/sshd_config &&
-        service ssh restart
-    } >/dev/null 2>&1
-    if [[ $? -eq 0 ]]; then
-        echo -e " ${success} SFTP has been configured "
-    else
-        echo -e " ${failure} Unable to configure SFTP " >&2
-    fi
-}
-
 function install_additional() {
     title "ADDITIONAL SOFTWARE"
     # Install Composer
@@ -350,7 +274,7 @@ function install_additional() {
     echo -ne " ${working} Installing Node.js "
     sleep 1
     {
-        curl -sL https://deb.nodesource.com/setup_12.x | bash - &&
+        curl -sL https://deb.nodesource.com/setup_18.x | bash - &&
         apt-get install -y nodejs
     } >/dev/null 2>&1
     if [[ $? -eq 0 ]]; then
@@ -403,11 +327,10 @@ function create_directory() {
     srv_user="/srv/${inp_user_name}"
     site_dir="${srv_user}/${inp_domain_name}"
     if [[ ! -d "${site_dir}" ]]; then
-        mkdir -p ${site_dir}/{backup,logs,ssl,www/public} &&
+        mkdir -p ${site_dir}/{backup,logs,www/public} &&
         printf "%s\n" "<?php echo \"${inp_domain_name}\"; ?>" > ${site_dir}/www/public/index.php &&
         touch ${site_dir}/logs/{error,access}.log &&
-        { [[ "$inp_generate_ssl" =~ ^[yY]$ ]] && touch ${site_dir}/ssl/${inp_domain_name}.{key,crt} || :; } &&
-        chown "root:" $srv_user &&
+        chown "${inp_user_name}:${inp_user_name}" $srv_user &&
         chown -R "${inp_user_name}:" $site_dir
         if [[ $? -eq 0 ]]; then
             echo -e " ${success} Site directory has been created "
@@ -428,7 +351,7 @@ function create_fpm_pool() {
             "[${inp_user_name}]" \
             "user = ${inp_user_name}" \
             "group = ${inp_user_name}" \
-            "listen = /run/php/php7.3-fpm.${inp_user_name}.sock" \
+            "listen = /run/php/php8.1-fpm.${inp_user_name}.sock" \
             "listen.owner = www-data" \
             "listen.group = www-data" \
             "pm = dynamic" \
@@ -436,9 +359,9 @@ function create_fpm_pool() {
             "pm.start_servers = 2" \
             "pm.min_spare_servers = 1" \
             "pm.max_spare_servers = 3" \
-            > /etc/php/7.3/fpm/pool.d/${inp_user_name}.conf &&
+            > /etc/php/8.1/fpm/pool.d/${inp_user_name}.conf &&
         # Reload PHP-FPM
-        service php7.3-fpm reload
+        service php8.1-fpm reload
     } >/dev/null 2>&1
     if [[ $? -eq 0 ]]; then
         echo -e " ${success} PHP-FPM pool has been set up "
@@ -450,83 +373,11 @@ function create_fpm_pool() {
 }
 
 function create_virtual_host() {
-    if [[ "$inp_generate_ssl" =~ ^[yY]$ ]]; then
-        echo -ne " ${working} Generating SSL certificate "
-        sleep 1
-        # Get geolocation for SSL certificate
-        local lookup="$(curl -s 'geoip.ubuntu.com/lookup')" &&
-        local country="$(echo ${lookup} | sed -n -e 's/.*<CountryCode>\(.*\)<\/CountryCode>.*/\1/p')" &&
-        local state="$(echo ${lookup} | sed -n -e 's/.*<RegionName>\(.*\)<\/RegionName>.*/\1/p')" &&
-        local locality="$(echo ${lookup} | sed -n -e 's/.*<City>\(.*\)<\/City>.*/\1/p')" &&
-        local organization="${inp_domain_name}" &&
-        local common_name="${inp_domain_name}" &&
-        local email="admin@${inp_domain_name}"
-        if [[ $? -eq 0 ]]; then
-            # Generate SSL certificate
-            openssl req -new -x509 -days 3650 -newkey rsa:4096 -nodes \
-                -subj "/C=${country}/ST=${state}/L=${locality}/O=${organization}/OU=IT/CN=${common_name}/emailAddress=${email}" \
-                -keyout "${site_dir}/ssl/${inp_domain_name}.key" -out "${site_dir}/ssl/${inp_domain_name}.crt" >/dev/null 2>&1
-            if [[ $? -eq 0 ]]; then
-                echo -e " ${success} SSL certificate has been generated "
-            else
-                echo -e " ${failure} Unable to generate SSL certificate " >&2
-            fi
-        else
-            echo -e " ${failure} Unable to gather data for SSL " >&2
-        fi
-        # Create Apache virtual host for https
-        echo -ne " ${working} Creating Apache virtual host for https "
-        sleep 1
-        {
-            printf "%s\n" \
-                "<IfModule mod_ssl.c>" \
-                "    <VirtualHost _default_:443>" \
-                "        ServerName ${inp_domain_name}" \
-                "        ServerAlias www.${inp_domain_name}" \
-                "        ServerAdmin admin@${inp_domain_name}" \
-                "        " \
-                "        DirectoryIndex index.html index.php" \
-                "        DocumentRoot ${site_dir}/www/public" \
-                "        " \
-                "        ErrorLog ${site_dir}/logs/error.log" \
-                "        CustomLog ${site_dir}/logs/access.log combined" \
-                "        " \
-                "        SSLEngine on" \
-                "        SSLCertificateFile ${site_dir}/ssl/${inp_domain_name}.crt" \
-                "        SSLCertificateKeyFile ${site_dir}/ssl/${inp_domain_name}.key" \
-                "        " \
-                "        <Directory ${site_dir}/www/public>" \
-                "            Options -Indexes +FollowSymLinks +MultiViews" \
-                "            AllowOverride All" \
-                "            Require all granted" \
-                "        </Directory>" \
-                "        <FilesMatch \.php$>" \
-                "            SSLOptions +StdEnvVars" \
-                "            SetHandler \"proxy:unix:/var/run/php/php7.3-fpm.${inp_user_name}.sock|fcgi://localhost/\"" \
-                "        </FilesMatch>" \
-                "    </VirtualHost>" \
-                "</IfModule>" \
-                > /etc/apache2/sites-available/${inp_domain_name}.ssl.conf &&
-            a2ensite ${inp_domain_name}.ssl
-        } >/dev/null 2>&1
-    fi
     # Create Apache virtual host for http
     echo -ne " ${working} Creating Apache virtual host for http "
     sleep 1
     {
         {
-            [[ "$inp_generate_ssl" =~ ^[yY]$ ]] &&
-            printf "%s\n" \
-                "<VirtualHost *:80>" \
-                "    ServerName ${inp_domain_name}" \
-                "    ServerAlias www.${inp_domain_name}" \
-                "    ServerAdmin admin@${inp_domain_name}" \
-                "    " \
-                "    DocumentRoot ${site_dir}/www/public" \
-                "    " \
-                "    Redirect permanent \"/\" \"https://${inp_domain_name}/\"" \
-                "</VirtualHost>" \
-                > /etc/apache2/sites-available/${inp_domain_name}.conf ||
             printf "%s\n" \
                 "<VirtualHost *:80>" \
                 "    ServerName ${inp_domain_name}" \
@@ -545,7 +396,7 @@ function create_virtual_host() {
                 "        Require all granted" \
                 "    </Directory>" \
                 "    <FilesMatch \.php$>" \
-                "        SetHandler \"proxy:unix:/var/run/php/php7.3-fpm.${inp_user_name}.sock|fcgi://localhost/\"" \
+                "        SetHandler \"proxy:unix:/run/php/php8.1-fpm.${inp_user_name}.sock|fcgi://localhost/\"" \
                 "    </FilesMatch>" \
                 "</VirtualHost>" \
                 > /etc/apache2/sites-available/${inp_domain_name}.conf
@@ -597,27 +448,6 @@ function create_database() {
     fi
 }
 
-function enable_sftp() {
-    # Add user to the SFTP group
-    echo -ne " ${working} Setting up SFTP "
-    sleep 1
-    usermod -a -G sftp_users "${inp_user_name}" >/dev/null 2>&1 &&
-    {
-        if grep -q "AllowUsers" $sshd_conf; then
-            sed -i "s/AllowUsers.*/& ${inp_user_name}/" $sshd_conf
-        else
-            sed -i "/# Authentication:/a AllowUsers ${inp_user_name}" $sshd_conf
-        fi
-    } >/dev/null 2>&1
-    if [[ $? -eq 0 ]]; then
-        echo -e " ${success} SFTP has been enabled for user ${inp_user_name} "
-        return 0
-    else
-        echo -e " ${failure} Unable to set up SFTP " >&2
-        return 1
-    fi
-}
-
 function misc_tweaks() {
     title "MISC. TWEAKS"
     echo -ne " ${working} Adding bash aliases "
@@ -641,7 +471,7 @@ function misc_tweaks() {
 
 function amp_installed() {
     dpkg -l | grep -q apache2 &&
-    dpkg -l | grep -q php7.3-fpm &&
+    dpkg -l | grep -q php8.1-fpm &&
     dpkg -l | grep -q mariadb
 }
 
